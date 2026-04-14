@@ -1,0 +1,18 @@
+# 秘密情報
+.env
+*.db
+data/polywhale.db
+
+# Pythonキャッシュ
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ログ・一時ファイル
+logs/
+*.log
+
+# OS関連
+.DS_Store
+Thumbs.db

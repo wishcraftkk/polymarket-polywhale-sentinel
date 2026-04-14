@@ -1,0 +1,9 @@
+httpx
+pandas
+numpy
+python-dotenv
+python-telegram-bot
+APScheduler
+sqlalchemy
+aiosqlite
+web3
