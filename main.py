@@ -40,7 +40,7 @@ async def daily_full_evaluation():
     await daily_performance_summary()
 
 async def daily_performance_summary():
-    """Phase 4 新機能：毎日朝6時に全A級ウォレットの集計をTelegram通知"""
+    """Phase 4 強化版：スコア0.0・データなしウォレットを自動スキップ"""
     if not MONITORED_WALLETS:
         await send_alert("📉 本日のパフォーマンス集計対象なし", level="info")
         return
@@ -49,32 +49,46 @@ async def daily_performance_summary():
     total_trades = 0
     total_wallets = len(MONITORED_WALLETS)
     active_wallets = 0
-
     summary_lines = ["📅 **日次パフォーマンスまとめ** (JST)"]
-    
+
+    cleaned_wallets = []  # 無効ウォレットを除外するためのリスト
+
     for wallet in list(MONITORED_WALLETS):
-        result = await calculate_composite_score(wallet)  # 最新スコア取得
+        result = await calculate_composite_score(wallet)
         details = result.get("details", {})
+        score = details.get("composite_score", 0)
+        sample_size = details.get("sample_size", 0)
+
+        # 【新規】スコア0.0 または データ0件はスキップ＋監視対象から除外
+        if score <= 0 or sample_size == 0:
+            print(f"🧹 低スコア/データなしウォレットを監視対象から除外: {wallet[:8]}...")
+            continue
+
+        cleaned_wallets.append(wallet)
         pnl = details.get("total_pnl", 0)
-        win_rate = details.get("win_rate", 0)
-        trades = details.get("sample_size", 0)
-        
+        win_rate = details.get("win_rate", 0)  # 実測値表示
+        trades = sample_size
+
         total_pnl += pnl
         total_trades += trades
         if trades > 0:
             active_wallets += 1
-        
+
         summary_lines.append(
             f"`{wallet[:8]}...` → ${pnl:,.0f} | 勝率 {win_rate:.1f}% | {trades}件"
         )
 
-    # RiskManagerデータも反映
+    # 監視対象をクリーンアップ
+    global MONITORED_WALLETS
+    MONITORED_WALLETS = set(cleaned_wallets)
+
+    # RiskManagerデータ
     risk_manager.reset_daily()
     dd_daily = (-risk_manager.daily_pnl / risk_manager.initial_capital * 100) if risk_manager.initial_capital else 0
     dd_total = (-risk_manager.total_pnl / risk_manager.initial_capital * 100) if risk_manager.initial_capital else 0
 
     summary_lines.append("\n📊 **全体集計**")
-    summary_lines.append(f"👥 A級ウォレット数: {total_wallets}件（アクティブ {active_wallets}）")
+    summary_lines.append(f"👥 A級ウォレット数: {len(cleaned_wallets)}件（アクティブ {active_wallets}）")
     summary_lines.append(f"💰 総PnL: **${total_pnl:,.0f}**")
     summary_lines.append(f"📈 総取引数: {total_trades}件")
     summary_lines.append(f"🛡️ 1日ドローダウン: {dd_daily:.1f}%")
@@ -83,7 +97,7 @@ async def daily_performance_summary():
 
     full_msg = "\n".join(summary_lines)
     await send_alert(full_msg, level="success")
-    print("✅ 日次パフォーマンスまとめ通知送信完了")
+    print("✅ 日次パフォーマンスまとめ通知送信完了（低スコアウォレット除外済み）")
 
 # realtime_monitor は変更なし（前回版のまま）
 async def realtime_monitor():
