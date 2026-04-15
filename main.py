@@ -13,7 +13,7 @@ from modules.risk_manager import risk_manager
 
 # グローバル監視対象
 MONITORED_WALLETS = set(TEST_WALLETS)
-FIRST_RUN = True  # 初回大量通知防止
+FIRST_RUN = True
 
 async def daily_full_evaluation():
     global FIRST_RUN
@@ -35,9 +35,58 @@ async def daily_full_evaluation():
     
     print(f"✅ 監視対象ウォレット: {len(MONITORED_WALLETS)}件に更新")
     FIRST_RUN = False
+    
+    # 【新規追加】評価終了後に日次パフォーマンスまとめ通知
+    await daily_performance_summary()
 
+async def daily_performance_summary():
+    """Phase 4 新機能：毎日朝6時に全A級ウォレットの集計をTelegram通知"""
+    if not MONITORED_WALLETS:
+        await send_alert("📉 本日のパフォーマンス集計対象なし", level="info")
+        return
+
+    total_pnl = 0.0
+    total_trades = 0
+    total_wallets = len(MONITORED_WALLETS)
+    active_wallets = 0
+
+    summary_lines = ["📅 **日次パフォーマンスまとめ** (JST)"]
+    
+    for wallet in list(MONITORED_WALLETS):
+        result = await calculate_composite_score(wallet)  # 最新スコア取得
+        details = result.get("details", {})
+        pnl = details.get("total_pnl", 0)
+        win_rate = details.get("win_rate", 0)
+        trades = details.get("sample_size", 0)
+        
+        total_pnl += pnl
+        total_trades += trades
+        if trades > 0:
+            active_wallets += 1
+        
+        summary_lines.append(
+            f"`{wallet[:8]}...` → ${pnl:,.0f} | 勝率 {win_rate:.1f}% | {trades}件"
+        )
+
+    # RiskManagerデータも反映
+    risk_manager.reset_daily()
+    dd_daily = (-risk_manager.daily_pnl / risk_manager.initial_capital * 100) if risk_manager.initial_capital else 0
+    dd_total = (-risk_manager.total_pnl / risk_manager.initial_capital * 100) if risk_manager.initial_capital else 0
+
+    summary_lines.append("\n📊 **全体集計**")
+    summary_lines.append(f"👥 A級ウォレット数: {total_wallets}件（アクティブ {active_wallets}）")
+    summary_lines.append(f"💰 総PnL: **${total_pnl:,.0f}**")
+    summary_lines.append(f"📈 総取引数: {total_trades}件")
+    summary_lines.append(f"🛡️ 1日ドローダウン: {dd_daily:.1f}%")
+    summary_lines.append(f"🛡️ 累積ドローダウン: {dd_total:.1f}%")
+    summary_lines.append(f"モード: {'🟢 Live' if not COPY_EXECUTION.get('PAPER_MODE') else '📋 Paper'}")
+
+    full_msg = "\n".join(summary_lines)
+    await send_alert(full_msg, level="success")
+    print("✅ 日次パフォーマンスまとめ通知送信完了")
+
+# realtime_monitor は変更なし（前回版のまま）
 async def realtime_monitor():
-    """リアルタイム新取引監視 → 評価 → リスクチェック → Copy Execution"""
     print(f"🔍 {datetime.now().strftime('%H:%M:%S')} リアルタイム監視中...（監視中: {len(MONITORED_WALLETS)}件）")
     
     if risk_manager.is_stopped():
@@ -50,21 +99,18 @@ async def realtime_monitor():
             continue
 
         for trade in new_trades:
-            # 再評価（最新スコア確認）
             eval_result = await calculate_composite_score(wallet)
             score = eval_result.get("details", {}).get("composite_score", 0)
             
             if score < COPY_EXECUTION.get("MIN_TARGET_SCORE", 85):
-                continue  # A級未満はスキップ
+                continue
 
-            # 取引詳細取得（ingestion モジュールから想定される構造に合わせ調整）
             market = trade.get("market", {})
             side = trade.get("side", "buy").lower()
             size = trade.get("size", 0.0)
             price = trade.get("price", 0.0)
             category = market.get("category", "OTHER")
 
-            # Copy Execution 呼び出し（Paper/Live自動）
             success = await copy_executor.execute_copy(
                 wallet_address=wallet,
                 market=market,
@@ -73,10 +119,6 @@ async def realtime_monitor():
                 price=price
             )
             
-            if success:
-                # PnL更新は約定後フィードバックで後ほど強化（現在はPaper Mode中心）
-                pass
-
         if new_trades:
             msg = f"""
 🔥 **新取引検知！** 
@@ -88,7 +130,6 @@ async def realtime_monitor():
             await send_alert(msg, level="high")
             print(f"🚨 新取引 {len(new_trades)}件 を処理しました！")
 
-# ------------------- スケジューラー -------------------
 scheduler = AsyncIOScheduler()
 
 async def main():
@@ -98,22 +139,19 @@ async def main():
     startup_msg = f"""
 {BOT_NAME} Phase 4 起動完了！
 ・Paper Mode: {COPY_EXECUTION.get('PAPER_MODE', True)}
-・毎日 {DAILY_EVAL_HOUR}時 Discovery + 評価
+・毎日 {DAILY_EVAL_HOUR}時 Discovery + 評価 + **日次パフォーマンスまとめ**
 ・A級ウォレットの新取引を1分ごとに監視・自動コピー
-・RiskManager ドローダウン監視有効
     """
     await send_alert(startup_msg, level="success")
     
-    # 起動直後評価
     await daily_full_evaluation()
     
-    # スケジュール
     scheduler.add_job(daily_full_evaluation, 'cron', hour=DAILY_EVAL_HOUR, minute=0)
     scheduler.add_job(realtime_monitor, 'interval', seconds=POLLING_INTERVAL_SECONDS)
     
     print("⏰ AsyncIOScheduler 開始（Ctrl+C で停止）")
     scheduler.start()
-    await asyncio.Event().wait()  # 永続稼働
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     try:
