@@ -8,6 +8,7 @@ from modules.evaluation import calculate_composite_score
 from modules.alert import send_alert, send_evaluation_alert
 from modules.ingestion import check_new_trades
 from utils.helpers import init_db  # ← 追加
+from modules.copy_executor import copy_executor
 
 # グローバル監視対象
 MONITORED_WALLETS = set(TEST_WALLETS)
@@ -38,6 +39,11 @@ async def realtime_monitor():
     for wallet in list(MONITORED_WALLETS):
         new_trades = await check_new_trades(wallet)
         if new_trades and not FIRST_RUN:  # 初回は通知抑制
+            # Phase 3: Copy Execution を呼び出す
+            for trade in new_trades:
+                result = await calculate_composite_score(wallet)
+                await copy_executor.execute_copy(wallet, trade, result.get("details", {}))
+
             msg = f"""
 🔥 **新取引検知！** 
 ウォレット: `{wallet[:8]}...`

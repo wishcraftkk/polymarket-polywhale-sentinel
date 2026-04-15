@@ -15,4 +15,7 @@ logs/
 
 # OS関連
 .DS_Store
-Thumbs.db
+Thumbs.db*.save
+__pycache__/
+*.log
+.env
