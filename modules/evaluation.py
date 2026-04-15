@@ -15,7 +15,6 @@ async def get_market_category(condition_id: str = None, market_title: str = None
     if cache_key in CATEGORY_CACHE:
         return CATEGORY_CACHE[cache_key]
 
-    # 1. まずタイトルキーワードで高速判定（最も効果的）
     if market_title:
         title_upper = market_title.upper()
         if any(k in title_upper for k in ["TRUMP", "ELECTION", "PRESIDENT", "SENATE", "HOUSE", "POLITICS", "KAMALA", "BIDEN"]):
@@ -28,7 +27,6 @@ async def get_market_category(condition_id: str = None, market_title: str = None
             CATEGORY_CACHE[cache_key] = "SPORTS"
             return "SPORTS"
 
-    # 2. Gamma APIでタグ取得（フォールバック）
     if condition_id:
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
@@ -36,13 +34,11 @@ async def get_market_category(condition_id: str = None, market_title: str = None
                 resp = await client.get(url, params={"condition_id": condition_id})
                 resp.raise_for_status()
                 data = resp.json()
-                
                 tags = []
                 if isinstance(data, list) and data:
                     tags = data[0].get("tags", []) or []
                 elif isinstance(data, dict):
                     tags = data.get("tags", []) or []
-                
                 for tag in tags:
                     label = tag.get("label", "").upper()
                     if "POLITICS" in label or "ELECTION" in label:
@@ -62,7 +58,7 @@ async def get_market_category(condition_id: str = None, market_title: str = None
     return "OTHER"
 
 async def calculate_composite_score(wallet: str, target_category: str = "OVERALL"):
-    """最終強化版：カテゴリ判定をタイトルキーワードで大幅改善"""
+    """Phase 4 強化版：勝率過剰評価を防止（サンプルサイズ補正＋ペナルティ追加）"""
     print(f"🔍 {wallet[:8]}... の評価を開始（カテゴリ別最終強化版）...")
 
     trades = await get_user_trades(wallet, limit=300)
@@ -82,6 +78,7 @@ async def calculate_composite_score(wallet: str, target_category: str = "OVERALL
                 total_pnl = float(df_closed[col].sum())
                 break
 
+    # 勝率計算（closed_positionsのみ）
     win_rate = 0.0
     if not df_closed.empty and "realizedPnl" in df_closed.columns:
         wins = (df_closed["realizedPnl"] > 0).sum()
@@ -95,21 +92,17 @@ async def calculate_composite_score(wallet: str, target_category: str = "OVERALL
         drawdown = (cum_pnl - peak) / peak.abs().replace(0, 1)
         max_drawdown = float(drawdown.min())
 
-    # カテゴリ別分析（タイトルキーワード強化版）
+    # カテゴリ別分析
     category_stats = {"OVERALL": {"pnl": total_pnl, "win_rate": win_rate, "count": sample_size}}
     if not df_closed.empty:
         for _, row in df_closed.iterrows():
             title = row.get("title") or row.get("market") or row.get("question") or ""
-            cat = await get_market_category(
-                condition_id=row.get("conditionId"),
-                market_title=title
-            )
+            cat = await get_market_category(condition_id=row.get("conditionId"), market_title=title)
             if cat not in category_stats:
                 category_stats[cat] = {"pnl": 0, "win_rate": 0, "count": 0}
             category_stats[cat]["pnl"] += row.get("realizedPnl", 0)
             category_stats[cat]["count"] += 1
 
-    # 指定カテゴリモード
     if target_category != "OVERALL" and target_category in category_stats:
         cat_data = category_stats[target_category]
         sample_size = cat_data["count"]
@@ -126,11 +119,20 @@ async def calculate_composite_score(wallet: str, target_category: str = "OVERALL
         status = f"❌ 排除: {', '.join(red_flags)}"
         return {"score": 0, "status": status, "details": {"red_flags": red_flags}}
 
-    # A/B/C級スコア
+    # 【Phase 4 強化】勝率ペナルティ（小サンプルで過剰評価防止）
+    win_rate_penalty = 0
+    if sample_size < 50:
+        win_rate_penalty = (50 - sample_size) * 0.8  # 小サンプルほどペナルティ大
+    adjusted_win_rate = max(0, win_rate - win_rate_penalty)
+
+    # A/B/C級スコア（より現実的に）
     a_score = 95 if sample_size >= MIN_SAMPLE_SIZE and total_pnl > 0 else 40
-    b_score = 92 if win_rate >= 70 else 78 if win_rate >= 55 else 50
-    recent_score = 95 if total_pnl > 500_000 else 85 if total_pnl > 100_000 else 65
-    c_score = 85
+    b_score = 92 if adjusted_win_rate >= 70 else 78 if adjusted_win_rate >= 55 else 50
+    # recent_score：直近PnLだけでなく「勝率」も考慮
+    recent_score = 95 if (total_pnl > 500_000 and adjusted_win_rate > 70) else \
+                   85 if (total_pnl > 100_000 and adjusted_win_rate > 60) else 65
+
+    c_score = 85 if sample_size >= 100 else 70
 
     composite_score = (
         COMPOSITE_WEIGHTS["A"] * a_score +
@@ -144,7 +146,8 @@ async def calculate_composite_score(wallet: str, target_category: str = "OVERALL
     details = {
         "sample_size": int(sample_size),
         "total_pnl": round(total_pnl, 2),
-        "win_rate": round(win_rate, 1),
+        "win_rate": round(win_rate, 1),           # 表示は実測値
+        "adjusted_win_rate": round(adjusted_win_rate, 1),  # 内部調整値
         "max_drawdown": round(max_drawdown * 100, 1),
         "composite_score": round(composite_score, 1),
         "status": status,
@@ -152,5 +155,5 @@ async def calculate_composite_score(wallet: str, target_category: str = "OVERALL
         "red_flags": red_flags
     }
 
-    print(f"✅ 評価完了 → Score: {composite_score:.1f} / {status} (PnL ${total_pnl:,.0f} | DD {max_drawdown*100:.1f}%)")
+    print(f"✅ 評価完了 → Score: {composite_score:.1f} / {status} (PnL ${total_pnl:,.0f} | DD {max_drawdown*100:.1f}% | 勝率 {win_rate:.1f}%)")
     return {"score": composite_score, "status": status, "details": details}
