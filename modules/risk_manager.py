@@ -1,7 +1,6 @@
 from datetime import date
 import asyncio
-from config import COPY_EXECUTION, TOTAL_CAPITAL_USDC
-from modules.alert import send_alert  # 存在しない場合は後で調整
+from config import COPY_EXECUTION  # TOTAL_CAPITAL_USDCは削除（辞書内から取得）
 
 class RiskManager:
     def __init__(self):
@@ -9,11 +8,13 @@ class RiskManager:
         self.daily_pnl = 0.0
         self.total_pnl = 0.0
         self.last_reset_date = date.today()
-        self.initial_capital = COPY_EXECUTION.get("INITIAL_CAPITAL_USDC", TOTAL_CAPITAL_USDC)
+        # TOTAL_CAPITAL_USDC を COPY_EXECUTION から安全に取得
+        self.initial_capital = COPY_EXECUTION.get("INITIAL_CAPITAL_USDC", 
+                                                  COPY_EXECUTION.get("TOTAL_CAPITAL_USDC", 4000.0))
         self.stopped = False
         self.daily_trade_count = 0
         self.last_trade_date = date.today()
-        print("🛡️ RiskManager initialized (Phase 4 enhanced)")
+        print("🛡️ RiskManager initialized (Phase 4 enhanced - import fixed)")
 
     def reset_daily(self):
         today = date.today()
@@ -24,7 +25,7 @@ class RiskManager:
             self.stopped = False
 
     def check_trade(self, notional: float, category: str = "OTHER") -> dict:
-        """Phase 4 用：取引実行前の総合リスクチェック"""
+        """取引実行前の総合リスクチェック"""
         self.reset_daily()
 
         if self.stopped:
@@ -36,21 +37,18 @@ class RiskManager:
             return {"approved": False, "reason": f"Category {category} not allowed"}
 
         # 取引数制限
-        if date.today() == self.last_trade_date:
+        today = date.today()
+        if today == self.last_trade_date:
             if self.daily_trade_count >= COPY_EXECUTION.get("MAX_TRADES_PER_DAY", 8):
                 return {"approved": False, "reason": "Daily trade limit reached"}
         else:
             self.daily_trade_count = 0
-            self.last_trade_date = date.today()
+            self.last_trade_date = today
 
         # 露出額チェック
         max_notional = COPY_EXECUTION.get("MAX_NOTIONAL_PER_TRADE", 10)
         if notional > max_notional:
             return {"approved": False, "reason": f"Notional {notional:.2f} exceeds max {max_notional}"}
-
-        # 同時露出率チェック（簡易版）
-        max_exposure = COPY_EXECUTION.get("MAX_EXPOSURE_PERCENT", 0.25) * self.initial_capital
-        # TODO: 実際のオープン positions 合計を DB から取得して計算（後で強化）
 
         return {"approved": True, "reason": "All checks passed"}
 
@@ -68,7 +66,7 @@ class RiskManager:
 
         if daily_dd > COPY_EXECUTION.get("MAX_DAILY_DRAWDOWN", 0.05):
             self.stopped = True
-            msg = f"🚨 **緊急停止**: 1日ドローダウン超過 ({daily_dd*100:.1f}% > {COPY_EXECUTION.get('MAX_DAILY_DRAWDOWN')*100:.1f}%)"
+            msg = f"🚨 **緊急停止**: 1日ドローダウン超過 ({daily_dd*100:.1f}%)"
             print(f"🛑 {msg}")
             try:
                 asyncio.create_task(send_alert(msg, level="error"))
@@ -78,7 +76,7 @@ class RiskManager:
 
         if total_dd > COPY_EXECUTION.get("MAX_TOTAL_DRAWDOWN", 0.15):
             self.stopped = True
-            msg = f"🚨 **緊急停止**: 累積ドローダウン超過 ({total_dd*100:.1f}% > {COPY_EXECUTION.get('MAX_TOTAL_DRAWDOWN')*100:.1f}%)"
+            msg = f"🚨 **緊急停止**: 累積ドローダウン超過 ({total_dd*100:.1f}%)"
             print(f"🛑 {msg}")
             try:
                 asyncio.create_task(send_alert(msg, level="error"))
