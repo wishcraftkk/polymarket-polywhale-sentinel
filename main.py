@@ -41,17 +41,18 @@ async def daily_full_evaluation():
 
 async def daily_performance_summary():
     """Phase 4 強化版：スコア0.0・データなしウォレットを自動スキップ"""
+    global MONITORED_WALLETS   # ← ここに関数の最初に移動（重要！）
+
     if not MONITORED_WALLETS:
         await send_alert("📉 本日のパフォーマンス集計対象なし", level="info")
         return
 
     total_pnl = 0.0
     total_trades = 0
-    total_wallets = len(MONITORED_WALLETS)
     active_wallets = 0
     summary_lines = ["📅 **日次パフォーマンスまとめ** (JST)"]
 
-    cleaned_wallets = []  # 無効ウォレットを除外するためのリスト
+    cleaned_wallets = []  # 無効ウォレットを除外
 
     for wallet in list(MONITORED_WALLETS):
         result = await calculate_composite_score(wallet)
@@ -59,14 +60,14 @@ async def daily_performance_summary():
         score = details.get("composite_score", 0)
         sample_size = details.get("sample_size", 0)
 
-        # 【新規】スコア0.0 または データ0件はスキップ＋監視対象から除外
+        # スコア0.0 または データ0件はスキップ＋監視対象から除外
         if score <= 0 or sample_size == 0:
             print(f"🧹 低スコア/データなしウォレットを監視対象から除外: {wallet[:8]}...")
             continue
 
         cleaned_wallets.append(wallet)
         pnl = details.get("total_pnl", 0)
-        win_rate = details.get("win_rate", 0)  # 実測値表示
+        win_rate = details.get("win_rate", 0)
         trades = sample_size
 
         total_pnl += pnl
@@ -79,7 +80,6 @@ async def daily_performance_summary():
         )
 
     # 監視対象をクリーンアップ
-    global MONITORED_WALLETS
     MONITORED_WALLETS = set(cleaned_wallets)
 
     # RiskManagerデータ
@@ -98,7 +98,7 @@ async def daily_performance_summary():
     full_msg = "\n".join(summary_lines)
     await send_alert(full_msg, level="success")
     print("✅ 日次パフォーマンスまとめ通知送信完了（低スコアウォレット除外済み）")
-
+    
 # realtime_monitor は変更なし（前回版のまま）
 async def realtime_monitor():
     print(f"🔍 {datetime.now().strftime('%H:%M:%S')} リアルタイム監視中...（監視中: {len(MONITORED_WALLETS)}件）")
