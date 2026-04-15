@@ -42,30 +42,31 @@ TEST_WALLETS = [
 DISCOVERY_LIMIT = 20
 DISCOVERY_CATEGORIES = ["OVERALL", "POLITICS", "CRYPTO", "SPORTS"]
 
-# ==================== 【Phase 4】 COPY_EXECUTION 設定（Live Mode 安全設計） ====================
+# ==================== 【Phase 4】 COPY_EXECUTION 設定 ====================
 COPY_EXECUTION = {
-    "ENABLED": True,                    # コピー機能全体のオン/オフ（緊急停止用）
-    "PAPER_MODE": True,                 # True = Paper Mode（検証中） / False = Live Mode（本番USDC自動注文）
+    "ENABLED": True,
+    "PAPER_MODE": True,
     
     # ポジションサイズ制御
-    "COPY_RATIO": 0.05,                 # 対象ウォレットの取引額に対するコピー比率（最初は5%超安全）
-    "MAX_NOTIONAL_PER_TRADE": 10,       # 1取引あたりの絶対上限（USDC）
+    "COPY_RATIO": 0.05,
+    "MAX_NOTIONAL_PER_TRADE": 10,
     
     # リスク制限
-    "MAX_EXPOSURE_PERCENT": 0.25,       # 同時最大露出率（総資金の25%以内）
-    "MAX_SLIPPAGE_PERCENT": 0.5,        # 許容スリッページ（%）
-    "MAX_TRADES_PER_DAY": 8,            # 1日の最大取引数
-    "MIN_TARGET_SCORE": 85,             # A級のみ対象（Composite Score閾値）
-    "ALLOWED_CATEGORIES": ["POLITICS"], # Politics特化推奨（最初はこれで）
+    "MAX_EXPOSURE_PERCENT": 0.25,
+    "MAX_SLIPPAGE_PERCENT": 0.5,
+    "MAX_TRADES_PER_DAY": 8,
+    "MIN_TARGET_SCORE": 85,
     
-    # ドローダウン監視（RiskManager連携）
+    # 【ここを修正】カテゴリフィルタを一時的に緩和（Paper Mode検証用）
+    "ALLOWED_CATEGORIES": ["POLITICS", "CRYPTO", "SPORTS", "OTHER"],   # ← 全カテゴリ許可
+    
+    # ドローダウン監視
     "TRACK_DRAWDOWN": True,
-    "MAX_DAILY_DRAWDOWN": 0.05,         # 1日5%で自動停止
-    "MAX_TOTAL_DRAWDOWN": 0.15,         # 累積15%で自動停止
+    "MAX_DAILY_DRAWDOWN": 0.05,
+    "MAX_TOTAL_DRAWDOWN": 0.15,
     
-    # 資金設定（実際の残高に合わせて調整）
-    "INITIAL_CAPITAL_USDC": 200.0,      # 運用開始資金
-    "TOTAL_CAPITAL_USDC": 4000.0,       # 総資産（リスク計算用）← あなたの実際の資金に変更推奨
+    "INITIAL_CAPITAL_USDC": 200.0,
+    "TOTAL_CAPITAL_USDC": 4000.0,
 }
 
 # ==================== Hardware Wallet / ClobClient 用設定（Phase 4） ====================
