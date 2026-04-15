@@ -27,16 +27,25 @@ async def daily_full_evaluation():
     
     for wallet in target_wallets:
         result = await calculate_composite_score(wallet)
+        details = result.get("details", {})
+        score = details.get("composite_score", 0)
+        sample_size = details.get("sample_size", 0)
+
+        # 【最終強化】スコア0.0 または データ0件は通知を完全にスキップ
+        if score <= 0 or sample_size == 0:
+            print(f"🧹 低スコア/データなしウォレットを通知＆監視スキップ: {wallet[:8]}...")
+            continue
+
         await send_evaluation_alert(wallet, result)
         
-        if result.get("details", {}).get("composite_score", 0) >= COPY_EXECUTION.get("MIN_TARGET_SCORE", 85):
+        if score >= COPY_EXECUTION.get("MIN_TARGET_SCORE", 85):
             MONITORED_WALLETS.add(wallet)
             print(f"✅ A級追加: {wallet[:8]}...")
     
     print(f"✅ 監視対象ウォレット: {len(MONITORED_WALLETS)}件に更新")
     FIRST_RUN = False
     
-    # 【新規追加】評価終了後に日次パフォーマンスまとめ通知
+    # 日次パフォーマンスまとめ
     await daily_performance_summary()
 
 async def daily_performance_summary():
