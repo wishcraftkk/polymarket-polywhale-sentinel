@@ -58,7 +58,7 @@ COPY_EXECUTION = {
     "MIN_TARGET_SCORE": 85,
     
     # 【ここを修正】カテゴリフィルタをPOLITICS中心に絞る（Paper Mode検証用）
-    "ALLOWED_CATEGORIES": ["POLITICS", "CRYPTO"],   # OTHERを除外（Sportsも除外）
+    "ALLOWED_CATEGORIES": ["POLITICS"],   # OTHERを除外（Sportsも除外）
     
     # ドローダウン監視
     "TRACK_DRAWDOWN": True,

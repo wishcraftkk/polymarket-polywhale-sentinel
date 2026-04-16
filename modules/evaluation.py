@@ -121,10 +121,8 @@ async def calculate_composite_score(wallet: str, target_category: str = "OVERALL
 
      # 【Phase 4 強化版】勝率ペナルティ（より厳しく）
     win_rate_penalty = 0
-    if sample_size < 100:
-        win_rate_penalty = (100 - sample_size) * 1.2   # ペナルティを大幅強化
-    elif sample_size < 200:
-        win_rate_penalty = (200 - sample_size) * 0.6
+    if sample_size < 150:
+        win_rate_penalty = (150 - sample_size) * 1.5   # さらに厳しく
     adjusted_win_rate = max(0, win_rate - win_rate_penalty)
 
     # recent_scoreも調整
