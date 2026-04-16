@@ -57,8 +57,8 @@ COPY_EXECUTION = {
     "MAX_TRADES_PER_DAY": 8,
     "MIN_TARGET_SCORE": 85,
     
-    # 【ここを修正】カテゴリフィルタを一時的に緩和（Paper Mode検証用）
-    "ALLOWED_CATEGORIES": ["POLITICS", "CRYPTO", "SPORTS", "OTHER"],   # ← 全カテゴリ許可
+    # 【ここを修正】カテゴリフィルタをPOLITICS中心に絞る（Paper Mode検証用）
+    "ALLOWED_CATEGORIES": ["POLITICS", "CRYPTO"],   # OTHERを除外（Sportsも除外）
     
     # ドローダウン監視
     "TRACK_DRAWDOWN": True,

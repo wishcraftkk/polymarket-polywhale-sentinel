@@ -119,11 +119,17 @@ async def calculate_composite_score(wallet: str, target_category: str = "OVERALL
         status = f"❌ 排除: {', '.join(red_flags)}"
         return {"score": 0, "status": status, "details": {"red_flags": red_flags}}
 
-    # 【Phase 4 強化】勝率ペナルティ（小サンプルで過剰評価防止）
+     # 【Phase 4 強化版】勝率ペナルティ（より厳しく）
     win_rate_penalty = 0
-    if sample_size < 50:
-        win_rate_penalty = (50 - sample_size) * 0.8  # 小サンプルほどペナルティ大
+    if sample_size < 100:
+        win_rate_penalty = (100 - sample_size) * 1.2   # ペナルティを大幅強化
+    elif sample_size < 200:
+        win_rate_penalty = (200 - sample_size) * 0.6
     adjusted_win_rate = max(0, win_rate - win_rate_penalty)
+
+    # recent_scoreも調整
+    recent_score = 95 if (total_pnl > 500_000 and adjusted_win_rate > 75) else \
+                   85 if (total_pnl > 100_000 and adjusted_win_rate > 65) else 60 
 
     # A/B/C級スコア（より現実的に）
     a_score = 95 if sample_size >= MIN_SAMPLE_SIZE and total_pnl > 0 else 40

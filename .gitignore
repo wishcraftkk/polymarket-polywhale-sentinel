@@ -19,3 +19,5 @@ Thumbs.db*.save
 __pycache__/
 *.log
 .env
+*.backup
+*.save
