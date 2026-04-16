@@ -12,7 +12,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 POLYMARKET_DATA_API = "https://data-api.polymarket.com"
 GAMMA_API = "https://gamma-api.polymarket.com"
 
-# ==================== 評価設定 (Phase 3 から継続) ====================
+# ==================== 評価設定 ====================
 MIN_SAMPLE_SIZE = 50
 MAX_DRAWDOWN = 0.30
 SINGLE_MARKET_DEPENDENCY = 0.50
@@ -45,35 +45,31 @@ DISCOVERY_CATEGORIES = ["OVERALL", "POLITICS", "CRYPTO", "SPORTS"]
 # ==================== 【Phase 4】 COPY_EXECUTION 設定 ====================
 COPY_EXECUTION = {
     "ENABLED": True,
-    "PAPER_MODE": True,
+    "PAPER_MODE": True,                 # Live Mode移行時は False に変更
     
-    # ポジションサイズ制御
     "COPY_RATIO": 0.05,
     "MAX_NOTIONAL_PER_TRADE": 10,
-    
-    # リスク制限
     "MAX_EXPOSURE_PERCENT": 0.25,
     "MAX_SLIPPAGE_PERCENT": 0.5,
     "MAX_TRADES_PER_DAY": 8,
     "MIN_TARGET_SCORE": 85,
     
-    # 【ここを修正】カテゴリフィルタをPOLITICS中心に絞る（Paper Mode検証用）
-    "ALLOWED_CATEGORIES": ["POLITICS"],   # OTHERを除外（Sportsも除外）
+    # カテゴリフィルタ（機会損失分析のため一時的に緩和可）
+    "ALLOWED_CATEGORIES": ["POLITICS"],   # ← ここを [] にすると全カテゴリ許可
     
-    # ドローダウン監視
     "TRACK_DRAWDOWN": True,
     "MAX_DAILY_DRAWDOWN": 0.05,
     "MAX_TOTAL_DRAWDOWN": 0.15,
     
-    "INITIAL_CAPITAL_USDC": 200.0,
-    "TOTAL_CAPITAL_USDC": 4000.0,
+    "INITIAL_CAPITAL_USDC": 200.0,      # ドローダウン計算の分母
+    "TOTAL_CAPITAL_USDC": 4000.0,       # 全体露出率計算の基準総資産
 }
 
-# ==================== Hardware Wallet / ClobClient 用設定（Phase 4） ====================
+# ==================== Hardware / ClobClient設定 ====================
 CLOB_CONFIG = {
     "HOST": "https://clob.polymarket.com",
-    "CHAIN_ID": 137,                    # Polygon Mainnet
-    "SIGNATURE_TYPE": 0,                # 0 = 標準（Ledger + MetaMask推奨）
+    "CHAIN_ID": 137,
+    "SIGNATURE_TYPE": 0,
 }
 
-print(f"✅ {BOT_NAME} config.py 読み込み完了 - Phase 4 Live Mode 準備完了 (PAPER_MODE: {COPY_EXECUTION['PAPER_MODE']})")
+print(f"✅ {BOT_NAME} config.py 読み込み完了 (Paper Mode: {COPY_EXECUTION['PAPER_MODE']})")
