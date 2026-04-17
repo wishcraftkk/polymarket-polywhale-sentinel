@@ -14,17 +14,15 @@ from utils.helpers import init_db
 from modules.copy_executor import copy_executor
 from modules.risk_manager import risk_manager
 
-# ==================== グローバル変数 ====================
+# グローバル
 MONITORED_WALLETS = set(TEST_WALLETS)
 FIRST_RUN = True
-
-TRADE_LOG = []          # 実際に実行した取引（Paper/Live）
-OPPORTUNITY_LOG = []    # 拒絶された取引（機会損失用）
+TRADE_LOG = []          # 実行した取引
+OPPORTUNITY_LOG = []    # 拒絶された取引（機会損失）
 
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# ==================== 日次フル評価 ====================
 async def daily_full_evaluation():
     global FIRST_RUN
     print(f"📊 {datetime.now().strftime('%H:%M')} 毎日フル評価を開始...")
@@ -48,18 +46,14 @@ async def daily_full_evaluation():
         
         if score >= COPY_EXECUTION.get("MIN_TARGET_SCORE", 85):
             MONITORED_WALLETS.add(wallet)
-            print(f"✅ A級追加: {wallet[:8]}...")
     
     print(f"✅ 監視対象ウォレット: {len(MONITORED_WALLETS)}件に更新")
     FIRST_RUN = False
     await daily_performance_summary()
 
-# ==================== 日次パフォーマンスまとめ（24時間分＋機会損失） ====================
 async def daily_performance_summary():
     """当日24時間分の集計 + 機会損失表示"""
     today = datetime.now().date()
-    
-    # 当日分の実行取引
     today_trades = [t for t in TRADE_LOG if datetime.strptime(t["time"], "%H:%M:%S").date() == today]
     today_opp = [o for o in OPPORTUNITY_LOG if datetime.strptime(o["time"], "%H:%M:%S").date() == today]
 
@@ -72,7 +66,6 @@ async def daily_performance_summary():
 
     summary_lines = ["📅 **日次パフォーマンスまとめ** (JST)"]
 
-    # A級ウォレット一覧
     for wallet in list(MONITORED_WALLETS):
         result = await calculate_composite_score(wallet)
         details = result.get("details", {})
@@ -81,9 +74,7 @@ async def daily_performance_summary():
         pnl = details.get("total_pnl", 0)
         win_rate = details.get("win_rate", 0)
         if score > 0 and sample_size > 0:
-            summary_lines.append(
-                f"`{wallet[:8]}...` → ${pnl:,.0f} | 勝率 {win_rate:.1f}% (データ: {sample_size}件)"
-            )
+            summary_lines.append(f"`{wallet[:8]}...` → ${pnl:,.0f} | 勝率 {win_rate:.1f}% (データ: {sample_size}件)")
 
     summary_lines.append("\n📊 **当日集計 (24時間分)**")
     summary_lines.append(f"👥 A級ウォレット数: {len(MONITORED_WALLETS)}件")
@@ -91,11 +82,9 @@ async def daily_performance_summary():
     summary_lines.append(f"📈 当日取引数: {total_trades}件")
     summary_lines.append(f"📊 平均Notional: **${avg_notional:,.0f}**")
 
-    # 機会損失
     summary_lines.append(f"\n📉 **機会損失** (拒絶取引)")
     summary_lines.append(f"想定PnL: **${opp_pnl:,.0f}** ({opp_count}件)")
 
-    # RiskManager
     risk_manager.reset_daily()
     dd_daily = (-risk_manager.daily_pnl / risk_manager.initial_capital * 100) if risk_manager.initial_capital else 0
     dd_total = (-risk_manager.total_pnl / risk_manager.initial_capital * 100) if risk_manager.initial_capital else 0
@@ -104,11 +93,10 @@ async def daily_performance_summary():
 
     full_msg = "\n".join(summary_lines)
     await send_alert(full_msg, level="success")
-    print("✅ 日次レポート（機会損失含む）送信完了")
+    print("✅ 日次レポート送信完了")
 
     await export_daily_csv()
 
-# ==================== リアルタイム監視 ====================
 async def realtime_monitor():
     print(f"🔍 {datetime.now().strftime('%H:%M:%S')} リアルタイム監視中...（{len(MONITORED_WALLETS)}件）")
     
@@ -137,7 +125,6 @@ async def realtime_monitor():
             notional = min(size * COPY_EXECUTION.get("COPY_RATIO", 0.05) * price, 
                           COPY_EXECUTION.get("MAX_NOTIONAL_PER_TRADE", 10))
 
-            # Risk Check
             risk_check = risk_manager.check_trade(
                 notional=notional,
                 category=category,
@@ -146,7 +133,6 @@ async def realtime_monitor():
             )
 
             if not risk_check.get("approved", False):
-                # 機会損失記録
                 OPPORTUNITY_LOG.append({
                     "time": datetime.now().strftime("%H:%M:%S"),
                     "wallet": wallet,
@@ -154,27 +140,20 @@ async def realtime_monitor():
                     "side": side,
                     "notional": notional,
                     "reason": risk_check.get("reason", "Unknown"),
-                    "assumed_pnl": 0.0   # 将来的に想定PnL計算を追加可能
+                    "assumed_pnl": 0.0
                 })
                 continue
 
-            # 実行記録
             TRADE_LOG.append({
                 "time": datetime.now().strftime("%H:%M:%S"),
                 "wallet": wallet,
                 "side": side,
                 "notional": notional,
                 "market": market_title,
-                "pnl": 0.0   # 後で実際のPnLを更新可能
+                "pnl": 0.0
             })
 
-            success = await copy_executor.execute_copy(
-                wallet_address=wallet,
-                market=market,
-                side=side,
-                size=size,
-                price=price
-            )
+            await copy_executor.execute_copy(wallet, market, side, size, price)
 
         if new_trades:
             await send_alert(
@@ -182,7 +161,6 @@ async def realtime_monitor():
                 level="high"
             )
 
-# ==================== 補助機能 ====================
 async def hourly_paper_log():
     if not TRADE_LOG:
         return
@@ -195,11 +173,9 @@ async def hourly_paper_log():
 async def export_daily_csv():
     if TRADE_LOG or OPPORTUNITY_LOG:
         filename = f"{LOG_DIR}/paper_trades_{datetime.now().strftime('%Y%m%d')}.csv"
-        df = pd.DataFrame(TRADE_LOG)
-        df.to_csv(filename, index=False, encoding="utf-8")
+        pd.DataFrame(TRADE_LOG).to_csv(filename, index=False, encoding="utf-8")
         print(f"✅ CSV出力完了: {filename}")
 
-# ==================== メイン ====================
 scheduler = AsyncIOScheduler()
 
 async def main():
@@ -211,7 +187,7 @@ async def main():
     
     scheduler.add_job(daily_full_evaluation, 'cron', hour=DAILY_EVAL_HOUR, minute=0)
     scheduler.add_job(realtime_monitor, 'interval', seconds=POLLING_INTERVAL_SECONDS)
-    scheduler.add_job(hourly_paper_log, 'interval', hours=1)
+    scheduler.add_job(hourly_paper_log, 'interval', hours=1)   # 1時間ごと確実に
     
     print("⏰ Scheduler開始")
     scheduler.start()
