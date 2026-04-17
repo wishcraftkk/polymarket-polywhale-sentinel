@@ -7,3 +7,4 @@ APScheduler
 sqlalchemy
 aiosqlite
 web3
+streamlit
