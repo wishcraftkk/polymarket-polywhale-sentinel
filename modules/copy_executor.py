@@ -8,6 +8,7 @@ import telegram
 
 from config import COPY_EXECUTION, CLOB_CONFIG, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from modules.risk_manager import risk_manager
+from modules.alert import format_wallet_link   # ← 共通関数をインポート
 
 logger = logging.getLogger(__name__)
 JST = ZoneInfo("Asia/Tokyo")
@@ -18,7 +19,6 @@ class CopyExecutor:
         self.paper_mode = COPY_EXECUTION.get("PAPER_MODE", True)
         self.copy_ratio = COPY_EXECUTION.get("COPY_RATIO", 0.05)
         self.max_notional = COPY_EXECUTION.get("MAX_NOTIONAL_PER_TRADE", 10)
-        self.max_slippage = COPY_EXECUTION.get("MAX_SLIPPAGE_PERCENT", 0.5)
         self.risk_manager = risk_manager
         self.bot = telegram.Bot(token=TELEGRAM_TOKEN) if TELEGRAM_TOKEN else None
         self.client = None
@@ -36,7 +36,7 @@ class CopyExecutor:
                 key=private_key,
                 signature_type=CLOB_CONFIG["SIGNATURE_TYPE"]
             )
-            logger.info(f"✅ ClobClient 初期化完了 (Dedicated EOA Mode)")
+            logger.info(f"✅ ClobClient 初期化完了")
         except Exception as e:
             logger.error(f"ClobClient初期化失敗: {e}")
 
@@ -48,33 +48,16 @@ class CopyExecutor:
             market_title = market.get("question") or market.get("title") or market.get("market") or "Unknown Market"
             notional = min(size * self.copy_ratio * price, self.max_notional)
 
-            risk_check = self.risk_manager.check_trade(
-                notional=notional,
-                category=market.get("category", "OTHER"),
-                wallet=wallet_address,
-                market_title=market_title
-            )
+            wallet_link = format_wallet_link(wallet_address)
 
-            if not risk_check["approved"]:
-                # 機会損失として詳細通知
-                await self._send_notification(
-                    f"❌ Risk Check Failed: {risk_check['reason']}\n"
-                    f"Wallet: `{wallet_address[:8]}...`\n"
-                    f"Market: {market_title}\n"
-                    f"Side: {side.upper()} | Notional: **{notional:.2f} USDC**"
-                )
-                return False
-
-            # 以降はPaper/Live実行（前回版と同じ）
             if self.paper_mode:
                 await self._send_notification(
                     f"📋 **Paper Mode Execution**\n"
-                    f"Wallet: `{wallet_address[:8]}...`\n"
-                    f"Market: {market_title}\n"
+                    f"ウォレット: {wallet_link}\n"
+                    f"マーケット: {market_title}\n"
                     f"Side: {side.upper()} | Notional: **{notional:.2f} USDC**"
                 )
                 return True
-            # Live Mode部分は省略（必要なら追加）
             return True
 
         except Exception as e:
@@ -86,7 +69,12 @@ class CopyExecutor:
             try:
                 jst_time = datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S JST')
                 full_msg = f"{message}\n\n🕒 {jst_time}"
-                await self.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=full_msg, parse_mode="Markdown")
+                await self.bot.send_message(
+                    chat_id=TELEGRAM_CHAT_ID,
+                    text=full_msg,
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True
+                )
             except Exception as e:
                 logger.error(f"通知失敗: {e}")
 

@@ -54,8 +54,8 @@ COPY_EXECUTION = {
     "MAX_TRADES_PER_DAY": 8,
     "MIN_TARGET_SCORE": 85,
     
-    # カテゴリフィルタ（機会損失分析のため一時的に緩和可）
-    "ALLOWED_CATEGORIES": ["POLITICS"],   # ← ここを [] にすると全カテゴリ許可
+    # 【変更】全カテゴリ許可（OTHER含む）
+    "ALLOWED_CATEGORIES": [],           # ← 空リスト = 全カテゴリ許可
     
     "TRACK_DRAWDOWN": True,
     "MAX_DAILY_DRAWDOWN": 0.05,
