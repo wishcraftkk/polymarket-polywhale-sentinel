@@ -63,8 +63,13 @@ COPY_EXECUTION = {
     
     "INITIAL_CAPITAL_USDC": 200.0,      # ドローダウン計算の分母
     "TOTAL_CAPITAL_USDC": 4000.0,       # 全体露出率計算の基準総資産
-}
 
+     # ==================== 勝率特化モード ====================
+    "WIN_RATE_FOCUSED": True,          # Trueにすると勝率特化モードで選抜
+    "WIN_RATE_MIN_SAMPLE": 1,          # 最低取引数（これ未満は除外）
+    "WIN_RATE_RECENT_WEIGHT": 0.6,      # 最近勝率（1M）の重み   
+}
+    
 # ==================== Hardware / ClobClient設定 ====================
 CLOB_CONFIG = {
     "HOST": "https://clob.polymarket.com",

@@ -2,7 +2,7 @@ import pandas as pd
 import asyncio
 import numpy as np
 from .ingestion import get_user_trades, get_user_closed_positions
-from config import MIN_SAMPLE_SIZE, MAX_DRAWDOWN, COMPOSITE_WEIGHTS, GAMMA_API
+from config import MIN_SAMPLE_SIZE, MAX_DRAWDOWN, COMPOSITE_WEIGHTS, GAMMA_API, COPY_EXECUTION
 import httpx
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -53,27 +53,21 @@ async def get_market_category(condition_id: str = None, market_title: str = None
     return "OTHER"
 
 async def get_period_performance(wallet: str, period: str = "ALL"):
-    """【最終強化版】ALL期間はフィルタ無効 + 詳細デバッグ"""
-    print(f"🔍 {wallet[:8]}... の {period} 性能統計を取得中...")
-
     closed_positions = await get_user_closed_positions(wallet)
-    print(f"   └ closed_positions 取得件数: {len(closed_positions) if closed_positions else 0}件")
-
     if not closed_positions:
         return {"pnl": 0.0, "win_rate": 0.0, "count": 0, "category_stats": {}}
 
     df = pd.DataFrame(closed_positions)
 
-    # ALL期間はフィルタをスキップ（全データ使用）
     if period == "ALL":
-        print(f"   └ ALL期間のためフィルタスキップ → {len(df)}件")
+        pass
     else:
         now = datetime.now(JST)
         if period == "1W":
             cutoff = now - timedelta(days=7)
         elif period == "1M":
             cutoff = now - timedelta(days=30)
-        else:  # 1D
+        else:
             cutoff = now - timedelta(days=1)
 
         def is_in_period(row):
@@ -88,13 +82,10 @@ async def get_period_performance(wallet: str, period: str = "ALL"):
             return False
 
         df = df[df.apply(is_in_period, axis=1)]
-        print(f"   └ {period} フィルタ後 → {len(df)}件")
 
     if df.empty:
-        print(f"   └ 最終的に0件 → 期間フィルタが原因の可能性大")
         return {"pnl": 0.0, "win_rate": 0.0, "count": 0, "category_stats": {}}
 
-    # PnL列検出
     pnl_col = None
     for col in ["realizedPnl", "cashPnl", "pnl", "profit", "netPnL"]:
         if col in df.columns:
@@ -122,8 +113,40 @@ async def get_period_performance(wallet: str, period: str = "ALL"):
         data = category_stats[cat]
         data["win_rate"] = round((data["count"] > 0 and data["pnl"] > 0) * 100, 1) if data["count"] > 0 else 0.0
 
-    print(f"✅ {period} 取得完了 → PnL ${total_pnl:,.0f} | {count}件")
     return {"pnl": round(total_pnl, 2), "win_rate": win_rate, "count": int(count), "category_stats": category_stats}
 
 async def calculate_composite_score(wallet: str, target_category: str = "OVERALL"):
+    """既存の総合スコア（簡易版）"""
     return {"score": 85.0, "status": "🟢 A級候補", "details": {"composite_score": 85.0, "sample_size": 50, "total_pnl": 0, "win_rate": 50.0}}
+
+async def calculate_win_rate_focused_score(wallet: str):
+    """勝率特化モードのスコア計算"""
+    print(f"🔍 {wallet[:8]}... の勝率特化評価を開始...")
+    perf = await get_period_performance(wallet, "ALL")
+    recent_perf = await get_period_performance(wallet, "1M")
+
+    sample_size = perf.get("count", 0)
+    win_rate = perf.get("win_rate", 0.0)
+    recent_win_rate = recent_perf.get("win_rate", 0.0)
+
+    if sample_size < COPY_EXECUTION.get("WIN_RATE_MIN_SAMPLE", 30):
+        return {"score": 0, "status": "❌ Sample不足", "details": {}}
+
+    adjusted_win_rate = win_rate * (sample_size / (sample_size + 50))
+    final_score = (
+        adjusted_win_rate * (1 - COPY_EXECUTION.get("WIN_RATE_RECENT_WEIGHT", 0.6)) +
+        recent_win_rate * COPY_EXECUTION.get("WIN_RATE_RECENT_WEIGHT", 0.6)
+    )
+
+    status = "🟢 勝率特化A級" if final_score >= 75 else "🟡 B級" if final_score >= 60 else "⚪ C級"
+
+    details = {
+        "win_rate_score": round(final_score, 1),
+        "win_rate": round(win_rate, 1),
+        "recent_win_rate": round(recent_win_rate, 1),
+        "sample_size": sample_size,
+        "status": status,
+    }
+
+    print(f"✅ 勝率特化評価完了 → Score: {final_score:.1f} / {status}")
+    return {"score": final_score, "status": status, "details": details}

@@ -9,7 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import BOT_NAME, DAILY_EVAL_HOUR, POLLING_INTERVAL_SECONDS, TEST_WALLETS, COPY_EXECUTION
 from modules.discovery import discover_top_wallets
-from modules.evaluation import calculate_composite_score, get_period_performance
+from modules.evaluation import calculate_composite_score, get_period_performance, get_market_category
 from modules.alert import send_alert, send_evaluation_alert, format_wallet_link
 from modules.ingestion import check_new_trades
 from utils.helpers import init_db
@@ -166,29 +166,68 @@ async def realtime_monitor():
             if score < COPY_EXECUTION.get("MIN_TARGET_SCORE", 85):
                 continue
 
+            # ==================== robustカテゴリ判定 ====================
             market_title = get_market_title(trade)
+            condition_id = trade.get("conditionId") or (trade.get("market") or {}).get("conditionId")
+            category = await get_market_category(condition_id=condition_id, market_title=market_title)
+            # ===========================================================
+
             side = trade.get("side", "buy").lower()
             size = trade.get("size", 0.0)
             price = trade.get("price", 0.0)
-            category = trade.get("category", "OTHER")
             notional = min(size * COPY_EXECUTION.get("COPY_RATIO", 0.05) * price, 
                           COPY_EXECUTION.get("MAX_NOTIONAL_PER_TRADE", 10))
 
-            risk_check = risk_manager.check_trade(notional=notional, category=category, wallet=wallet, market_title=market_title)
+            risk_check = risk_manager.check_trade(
+                notional=notional,
+                category=category,
+                wallet=wallet,
+                market_title=market_title
+            )
 
             wallet_link = format_wallet_link(wallet)
 
             if not risk_check.get("approved", False):
-                await send_alert(f"❌ **Risk Check Failed**\nウォレット: {wallet_link}\nマーケット: {market_title}\n金額: **{notional:.2f} USDC**\n理由: {risk_check.get('reason', 'Unknown')}", level="warning")
-                OPPORTUNITY_LOG.append({"time": datetime.now(JST).isoformat(), "wallet": wallet, "market": market_title, "side": side, "notional": notional, "reason": risk_check.get("reason", "Unknown"), "assumed_pnl": 0.0})
+                await send_alert(
+                    f"❌ **Risk Check Failed**\n"
+                    f"ウォレット: {wallet_link}\n"
+                    f"マーケット: {market_title}\n"
+                    f"カテゴリ: {category}\n"
+                    f"金額: **{notional:.2f} USDC**\n"
+                    f"理由: {risk_check.get('reason', 'Unknown')}",
+                    level="warning"
+                )
+                OPPORTUNITY_LOG.append({
+                    "time": datetime.now(JST).isoformat(),
+                    "wallet": wallet,
+                    "market": market_title,
+                    "side": side,
+                    "notional": notional,
+                    "reason": risk_check.get("reason", "Unknown"),
+                    "assumed_pnl": 0.0
+                })
                 continue
 
-            TRADE_LOG.append({"time": datetime.now(JST).isoformat(), "wallet": wallet, "side": side, "notional": notional, "market": market_title, "pnl": 0.0})
+            TRADE_LOG.append({
+                "time": datetime.now(JST).isoformat(),
+                "wallet": wallet,
+                "side": side,
+                "notional": notional,
+                "market": market_title,
+                "pnl": 0.0
+            })
+
             await copy_executor.execute_copy(wallet, trade, side, size, price)
 
         if new_trades:
             wallet_link = format_wallet_link(wallet)
-            await send_alert(f"🔥 **新取引検知！**\nウォレット: {wallet_link}\n取引数: {len(new_trades)}件\nモード: {'🟢 Live' if not COPY_EXECUTION.get('PAPER_MODE') else '📋 Paper'}", level="high")
+            await send_alert(
+                f"🔥 **新取引検知！**\n"
+                f"ウォレット: {wallet_link}\n"
+                f"取引数: {len(new_trades)}件\n"
+                f"モード: {'🟢 Live' if not COPY_EXECUTION.get('PAPER_MODE') else '📋 Paper'}",
+                level="high"
+            )
     
     save_shared_state()
 
@@ -222,13 +261,13 @@ scheduler = AsyncIOScheduler()
 
 async def main():
     await init_db()
-    print(f"🚀 {BOT_NAME} 状態共有＋緊急停止対応版 起動...")
+    print(f"🚀 {BOT_NAME} 状態共有＋robustカテゴリ判定版 起動...")
 
     if is_stop_requested():
         print("🛑 停止フラグが残っていたため起動を中止します")
         return
 
-    await send_alert(f"{BOT_NAME} 状態共有＋緊急停止対応版起動！", level="success")
+    await send_alert(f"{BOT_NAME} robustカテゴリ判定対応版起動！", level="success")
     
     await daily_full_evaluation()
     await hourly_paper_log()
@@ -236,7 +275,7 @@ async def main():
     scheduler.add_job(daily_full_evaluation, 'cron', hour=DAILY_EVAL_HOUR, minute=0)
     scheduler.add_job(realtime_monitor, 'interval', seconds=POLLING_INTERVAL_SECONDS)
     scheduler.add_job(hourly_paper_log, 'cron', minute=0)
-    scheduler.add_job(save_shared_state, 'interval', seconds=5)
+    scheduler.add_job(save_shared_state, 'interval', seconds=60)
     
     print("⏰ Scheduler開始")
     scheduler.start()
