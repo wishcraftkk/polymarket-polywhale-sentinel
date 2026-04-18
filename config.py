@@ -48,14 +48,14 @@ COPY_EXECUTION = {
     "PAPER_MODE": True,                 # Live Mode移行時は False に変更
     
     "COPY_RATIO": 0.05,
-    "MAX_NOTIONAL_PER_TRADE": 10,
+    "MAX_NOTIONAL_PER_TRADE": 7,
     "MAX_EXPOSURE_PERCENT": 0.25,
     "MAX_SLIPPAGE_PERCENT": 0.5,
-    "MAX_TRADES_PER_DAY": 8,
+    "MAX_TRADES_PER_DAY": 10,
     "MIN_TARGET_SCORE": 85,
     
     # 【変更】全カテゴリ許可（OTHER含む）
-    "ALLOWED_CATEGORIES": [],           # ← 空リスト = 全カテゴリ許可
+    "ALLOWED_CATEGORIES": ['CRYPTO', 'POLITICS'],
     
     "TRACK_DRAWDOWN": True,
     "MAX_DAILY_DRAWDOWN": 0.05,

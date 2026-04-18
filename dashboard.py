@@ -40,14 +40,15 @@ else:
 if st.button("🛑 緊急停止", type="primary", use_container_width=True):
     with open(STOP_FLAG, "w") as f:
         f.write("stop requested by dashboard")
-    st.success("✅ 緊急停止信号を発信しました！\nボットがまもなく停止します。")
+    st.success("✅ 緊急停止信号を発信しました！")
     st.rerun()
 
 if os.path.exists(STOP_FLAG):
-    st.error("🚨 ボットは緊急停止中です。screenで `python3 -u main.py` を実行して再起動してください。")
+    st.error("🚨 ボットは緊急停止中です。screenで再起動してください。")
 
-# ==================== パラメータ調整パネル ====================
+# ==================== パラメータ調整パネル（実際の反映機能） ====================
 st.subheader("⚙️ パラメータ調整パネル (Live Mode時のみ有効)")
+
 col1, col2 = st.columns(2)
 with col1:
     new_copy_ratio = st.slider("COPY_RATIO", 0.01, 0.20, COPY_EXECUTION.get("COPY_RATIO", 0.05), 0.01)
@@ -62,8 +63,29 @@ allowed_cats = st.multiselect(
 )
 
 if st.button("💾 設定を即時反映", type="secondary"):
-    st.success("✅ 設定を反映しました！（本実装ではconfig.py更新＋再起動が必要です）")
-    st.info(f"新しい設定: COPY_RATIO={new_copy_ratio}, MAX_NOTIONAL={new_max_notional}, ALLOWED_CATEGORIES={allowed_cats}")
+    # config.pyを動的に更新
+    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+    with open(config_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    
+    new_lines = []
+    for line in lines:
+        if "COPY_RATIO" in line:
+            new_lines.append(f'    "COPY_RATIO": {new_copy_ratio},\n')
+        elif "MAX_NOTIONAL_PER_TRADE" in line:
+            new_lines.append(f'    "MAX_NOTIONAL_PER_TRADE": {new_max_notional},\n')
+        elif "MAX_TRADES_PER_DAY" in line:
+            new_lines.append(f'    "MAX_TRADES_PER_DAY": {new_max_trades},\n')
+        elif "ALLOWED_CATEGORIES" in line:
+            new_lines.append(f'    "ALLOWED_CATEGORIES": {allowed_cats},\n')
+        else:
+            new_lines.append(line)
+    
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+    
+    st.success("✅ config.pyを更新しました！\nボットを再起動すると新しい設定が反映されます。")
+    st.rerun()
 
 # ==================== 当日PnLグラフ ====================
 st.subheader("📈 当日PnL推移 (グラフ)")
@@ -81,20 +103,18 @@ if TRADE_LOG:
 else:
     st.info("本日の取引データがまだありません")
 
-# ==================== 新規追加：機会損失の詳細分析 ====================
+# ==================== 機会損失分析 ====================
 st.subheader("📉 機会損失分析")
 if OPPORTUNITY_LOG:
     df_opp = pd.DataFrame(OPPORTUNITY_LOG)
     st.metric("今日の機会損失", f"{len(df_opp)}件 (想定PnL ${sum(o.get('notional',0) for o in OPPORTUNITY_LOG):,.2f})")
-    
     col1, col2 = st.columns(2)
     with col1:
         st.write("**拒否理由別**")
         st.dataframe(df_opp["reason"].value_counts(), use_container_width=True)
     with col2:
         st.write("**最近の拒否取引**")
-        st.dataframe(df_opp.tail(10)[["time", "wallet", "market", "notional", "reason"]], 
-                     use_container_width=True, hide_index=True)
+        st.dataframe(df_opp.tail(10)[["time", "wallet", "market", "notional", "reason"]], use_container_width=True, hide_index=True)
 else:
     st.info("現在、機会損失は発生していません")
 
