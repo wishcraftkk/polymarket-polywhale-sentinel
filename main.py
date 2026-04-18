@@ -3,6 +3,7 @@ from datetime import datetime, date, timedelta
 import csv
 import os
 import pandas as pd
+import json
 from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -17,7 +18,7 @@ from modules.risk_manager import risk_manager
 
 JST = ZoneInfo("Asia/Tokyo")
 
-# グローバル
+# グローバル変数
 MONITORED_WALLETS = set(TEST_WALLETS)
 FIRST_RUN = True
 TRADE_LOG = []
@@ -25,6 +26,19 @@ OPPORTUNITY_LOG = []
 
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
+
+STOP_FLAG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stop.flag")
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shared_state.json")
+
+def save_shared_state():
+    """ダッシュボードと状態を共有"""
+    state = {
+        "MONITORED_WALLETS": list(MONITORED_WALLETS),
+        "TRADE_LOG": TRADE_LOG[-100:],
+        "OPPORTUNITY_LOG": OPPORTUNITY_LOG[-100:]
+    }
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f)
 
 def get_market_title(trade: dict) -> str:
     for key in ["title", "question", "marketQuestion"]:
@@ -36,8 +50,21 @@ def get_market_title(trade: dict) -> str:
             return str(market[key])
     return "Unknown Market"
 
+def is_stop_requested():
+    if os.path.exists(STOP_FLAG_FILE):
+        print(f"🛑 停止フラグを検知しました → {STOP_FLAG_FILE}")
+        return True
+    return False
+
+def format_wallet_link(wallet: str) -> str:
+    short = wallet[:8] + "..."
+    url = f"https://polymarket.com/profile/{wallet}"
+    return f"[{short}]({url})"
+
 async def daily_full_evaluation():
     global FIRST_RUN
+    if is_stop_requested():
+        return
     print(f"📊 {datetime.now().strftime('%H:%M')} 毎日フル評価を開始...")
     await send_alert("🔎 Discovery開始 → 新規優秀ウォレットを探します...", level="info")
     
@@ -63,8 +90,11 @@ async def daily_full_evaluation():
     print(f"✅ 監視対象ウォレット: {len(MONITORED_WALLETS)}件に更新")
     FIRST_RUN = False
     await daily_performance_summary()
+    save_shared_state()
 
 async def daily_performance_summary():
+    if is_stop_requested():
+        return
     today = datetime.now(JST).date()
     today_trades = [t for t in TRADE_LOG if datetime.fromisoformat(t["time"]).date() == today]
 
@@ -115,8 +145,12 @@ async def daily_performance_summary():
     print("✅ 日次レポート送信完了")
 
     await export_daily_csv()
+    save_shared_state()
 
 async def realtime_monitor():
+    if is_stop_requested():
+        print("🛑 停止フラグ検知 → realtime_monitor停止")
+        return
     print(f"🔍 {datetime.now().strftime('%H:%M:%S')} リアルタイム監視中...（{len(MONITORED_WALLETS)}件）")
     if risk_manager.is_stopped():
         return
@@ -137,7 +171,8 @@ async def realtime_monitor():
             size = trade.get("size", 0.0)
             price = trade.get("price", 0.0)
             category = trade.get("category", "OTHER")
-            notional = min(size * COPY_EXECUTION.get("COPY_RATIO", 0.05) * price, COPY_EXECUTION.get("MAX_NOTIONAL_PER_TRADE", 10))
+            notional = min(size * COPY_EXECUTION.get("COPY_RATIO", 0.05) * price, 
+                          COPY_EXECUTION.get("MAX_NOTIONAL_PER_TRADE", 10))
 
             risk_check = risk_manager.check_trade(notional=notional, category=category, wallet=wallet, market_title=market_title)
 
@@ -154,8 +189,12 @@ async def realtime_monitor():
         if new_trades:
             wallet_link = format_wallet_link(wallet)
             await send_alert(f"🔥 **新取引検知！**\nウォレット: {wallet_link}\n取引数: {len(new_trades)}件\nモード: {'🟢 Live' if not COPY_EXECUTION.get('PAPER_MODE') else '📋 Paper'}", level="high")
+    
+    save_shared_state()
 
 async def hourly_paper_log():
+    if is_stop_requested():
+        return
     now = datetime.now(JST)
     one_hour_ago = now - timedelta(hours=1)
     recent_entries = [t for t in TRADE_LOG if datetime.fromisoformat(t["time"]) > one_hour_ago]
@@ -183,8 +222,13 @@ scheduler = AsyncIOScheduler()
 
 async def main():
     await init_db()
-    print(f"🚀 {BOT_NAME} 全通知リンク統一＋期間別評価版 起動...")
-    await send_alert(f"{BOT_NAME} 全通知リンク統一＋期間別評価版起動！\n・日次レポート24時間実績\n・評価通知 ALL/1M/1W 3テーブル", level="success")
+    print(f"🚀 {BOT_NAME} 状態共有＋緊急停止対応版 起動...")
+
+    if is_stop_requested():
+        print("🛑 停止フラグが残っていたため起動を中止します")
+        return
+
+    await send_alert(f"{BOT_NAME} 状態共有＋緊急停止対応版起動！", level="success")
     
     await daily_full_evaluation()
     await hourly_paper_log()
@@ -192,6 +236,7 @@ async def main():
     scheduler.add_job(daily_full_evaluation, 'cron', hour=DAILY_EVAL_HOUR, minute=0)
     scheduler.add_job(realtime_monitor, 'interval', seconds=POLLING_INTERVAL_SECONDS)
     scheduler.add_job(hourly_paper_log, 'cron', minute=0)
+    scheduler.add_job(save_shared_state, 'interval', seconds=5)
     
     print("⏰ Scheduler開始")
     scheduler.start()
@@ -202,4 +247,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
         print("🛑 ボットを停止します...")
+        if os.path.exists(STOP_FLAG_FILE):
+            os.remove(STOP_FLAG_FILE)
         scheduler.shutdown()
